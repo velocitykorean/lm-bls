@@ -4,7 +4,7 @@ Calm Relaxation Video Generator Module
 - Auto-Upscales 720p videos to 1080p Full HD using high-fidelity Lanczos + Unsharp filtering
 - Ping-pong seamless 20s loop units
 - Audio track loop with end fade-out
-- Fast hardware-accelerated NVENC encoding
+- Auto-detects NVENC GPU acceleration with smart CPU (libx264 veryfast) fallback
 """
 
 import os
@@ -27,6 +27,16 @@ def get_media_info(file_path):
     width = int(v_stream['width']) if v_stream else 1920
     height = int(v_stream['height']) if v_stream else 1080
     return width, height, duration
+
+def is_nvenc_available():
+    try:
+        res = subprocess.run(
+            ['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=duration=1:size=64x64:rate=24', '-c:v', 'h264_nvenc', '-f', 'null', '-'],
+            capture_output=True, text=True
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
 
 def get_video_filter_chain(width, height, upscale_to_1080p=True):
     """
@@ -96,8 +106,16 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
     loop_count = int(duration_seconds / block_dur) + 2
     fade_start = max(0, duration_seconds - 3)
 
+    # Check encoder
+    if is_nvenc_available():
+        print("[VIDEO] Using NVIDIA NVENC Hardware Acceleration...")
+        video_codec_args = ['-c:v', 'h264_nvenc', '-cq', '19', '-b:v', '14M']
+    else:
+        print("[VIDEO] Using CPU libx264 encoder (veryfast preset)...")
+        video_codec_args = ['-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast']
+
     # Step 3: Full assemble with audio loop and fade out
-    print(f"[VIDEO] Assembling full 1080p video with hardware acceleration...")
+    print(f"[VIDEO] Assembling full 1080p video...")
     cmd_full = [
         'ffmpeg', '-y',
         '-stream_loop', str(loop_count), '-i', temp_block,
@@ -108,19 +126,14 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
         ),
         '-map', '[v_out]',
         '-map', '[a_out]',
-        '-c:v', 'h264_nvenc', '-cq', '19', '-b:v', '14M',
+        *video_codec_args,
         '-c:a', 'aac', '-b:a', '320k',
         '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart',
         output_path
     ]
 
-    try:
-        subprocess.run(cmd_full, check=True)
-    except subprocess.CalledProcessError:
-        print("[VIDEO WARN] NVENC failed, falling back to libx264...")
-        cmd_full[cmd_full.index('h264_nvenc')] = 'libx264'
-        subprocess.run(cmd_full, check=True)
+    subprocess.run(cmd_full, check=True)
 
     # Cleanup temp
     for t in [temp_clean, temp_block]:

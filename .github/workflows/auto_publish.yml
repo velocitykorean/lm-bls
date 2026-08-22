@@ -22,7 +22,7 @@ permissions:
 jobs:
   publish-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     env:
       GOOGLE_DRIVE_VIDEO_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_VIDEO_FOLDER_ID }}
@@ -32,6 +32,7 @@ jobs:
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+      POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -58,7 +59,7 @@ jobs:
 
       - name: Run automation pipeline
         run: |
-          echo "Starting LuminaBlooms daily publishing pipeline..."
+          echo "Starting LuminaBlooms publishing pipeline..."
           DURATION="${{ github.event.inputs.duration || '3600' }}"
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
