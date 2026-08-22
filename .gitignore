@@ -1,0 +1,30 @@
+﻿# Secrets & Credentials
+.env
+service_account.json
+*.json.secret
+client_secrets.json
+
+# Local Heavy Media Files
+*.mp4
+*.mp3
+*.wav
+*.mkv
+*.mov
+input_videos/*
+input_audio/*
+output_videos/*
+!input_videos/.gitkeep
+!input_audio/.gitkeep
+!output_videos/.gitkeep
+
+# Temporary & Test Crops
+__pycache__/
+*.py[cod]
+*$py.class
+diff_*.png
+grok_*.png
+gemini_*.png
+star_*.png
+test_*.png
+output_thumbnails/*
+!output_thumbnails/.gitkeep
