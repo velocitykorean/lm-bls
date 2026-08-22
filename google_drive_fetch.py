@@ -1,9 +1,14 @@
 ﻿"""
-Google Drive Integration Module for Calm Relaxation Bot
+Google Drive Integration Module for Calm Relaxation Bot (LuminaBlooms)
 Fetches:
 1. Video Loops (MP4) from GOOGLE_DRIVE_VIDEO_FOLDER_ID
 2. Audio Tracks (MP3/WAV) from GOOGLE_DRIVE_AUDIO_FOLDER_ID
 3. Thumbnail Images (JPG/PNG) from GOOGLE_DRIVE_IMAGE_FOLDER_ID
+
+Supports:
+- Priority for new unpublished tracks
+- Infinite circulation mode (Weighted Least-Recently-Used selection)
+- Dynamic remixing across video, audio, and thumbnail permutations
 """
 import os
 import io
@@ -37,11 +42,10 @@ def get_drive_service():
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
     except ImportError:
-        print("[DRIVE] Google API libraries not installed. Run: pip install google-api-python-client google-auth")
+        print("[DRIVE] Google API libraries not installed.")
         return None
 
     if not GOOGLE_SERVICE_ACCOUNT_KEY:
-        print("[DRIVE WARN] GOOGLE_SERVICE_ACCOUNT_KEY is not set.")
         return None
 
     try:
@@ -124,7 +128,7 @@ def get_repost_counts():
                 data = json.load(f)
                 counts = {}
                 for item in data:
-                    sname = item.get("audio_name", "").strip().lower()
+                    sname = (item.get("audio_file") or item.get("audio_name") or item.get("song_name") or "").strip().lower()
                     if sname:
                         counts[sname] = counts.get(sname, 0) + 1
                 return counts
@@ -135,8 +139,7 @@ def get_repost_counts():
 def fetch_assets_triplet(allow_repost=True):
     """
     Fetches ONE video, ONE audio track, and ONE thumbnail image.
-    Tries Google Drive first; falls back to local input folders.
-    Returns: (video_path, audio_path, image_path, is_repost)
+    Supports Infinite Circulation Mode with Weighted Least-Recently-Used selection.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     vid_dir = os.path.join(script_dir, LOCAL_VIDEO_DIR)
@@ -159,16 +162,27 @@ def fetch_assets_triplet(allow_repost=True):
         if v_files and a_files and i_files:
             repost_counts = get_repost_counts()
             unpublished = [f for f in a_files if f['name'].strip().lower() not in repost_counts]
+            
             if unpublished:
+                # Phase 1: Pick unpublished audio first
                 sel_audio = unpublished[0]
                 sel_video = v_files[len(repost_counts) % len(v_files)]
                 sel_image = i_files[len(repost_counts) % len(i_files)]
                 is_repost = False
-            else:
-                sel_audio = random.choice(a_files)
+                print(f"[PIPELINE] New Track Found: {sel_audio['name']}")
+            elif allow_repost:
+                # Phase 2: Infinite Circulation - Weighted Random Selection
+                # Songs published fewer times get much higher probability
+                weights = [max(1, 1000 // (3 ** min(repost_counts.get(f['name'].strip().lower(), 0), 6))) for f in a_files]
+                sel_audio = random.choices(a_files, weights=weights, k=1)[0]
                 sel_video = random.choice(v_files)
                 sel_image = random.choice(i_files)
                 is_repost = True
+                prev_c = repost_counts.get(sel_audio['name'].strip().lower(), 0)
+                print(f"[PIPELINE] Infinite Circulation: Selected {sel_audio['name']} (published {prev_c} times before) with dynamic remix.")
+            else:
+                print("[INFO] All tracks published and repost is disabled.")
+                return None, None, None, False
 
             v_dest = os.path.join(vid_dir, sel_video['name'])
             a_dest = os.path.join(aud_dir, sel_audio['name'])
@@ -183,23 +197,29 @@ def fetch_assets_triplet(allow_repost=True):
 
             return v_dest, a_dest, i_dest, is_repost
 
-    # Fallback to local files
-    print("[PIPELINE] Using local input folders (input_videos, input_audio, input_images)...")
+    # Local files fallback
+    print("[PIPELINE] Using local input folders...")
     local_vids = sorted(glob.glob(os.path.join(vid_dir, "*.mp4")) + glob.glob(os.path.join(vid_dir, "*.mov")))
     local_auds = sorted(glob.glob(os.path.join(aud_dir, "*.mp3")) + glob.glob(os.path.join(aud_dir, "*.wav")))
     local_imgs = sorted(glob.glob(os.path.join(img_dir, "*.jpg")) + glob.glob(os.path.join(img_dir, "*.png")) + glob.glob(os.path.join(img_dir, "*.jpeg")))
 
     if not local_vids or not local_auds:
-        print("[ERROR] Missing local video or audio files in input directories.")
         return None, None, None, False
 
-    # Pick first available or round robin
-    sel_vid = local_vids[0]
-    sel_aud = local_auds[0]
-    sel_img = local_imgs[0] if local_imgs else None
+    repost_counts = get_repost_counts()
+    unpublished = [f for f in local_auds if os.path.basename(f).strip().lower() not in repost_counts]
+    if unpublished:
+        sel_aud = unpublished[0]
+        sel_vid = local_vids[len(repost_counts) % len(local_vids)]
+        sel_img = local_imgs[len(repost_counts) % len(local_imgs)] if local_imgs else None
+        is_repost = False
+    elif allow_repost:
+        weights = [max(1, 1000 // (3 ** min(repost_counts.get(os.path.basename(f).strip().lower(), 0), 6))) for f in local_auds]
+        sel_aud = random.choices(local_auds, weights=weights, k=1)[0]
+        sel_vid = random.choice(local_vids)
+        sel_img = random.choice(local_imgs) if local_imgs else None
+        is_repost = True
+    else:
+        return None, None, None, False
 
-    return sel_vid, sel_aud, sel_img, False
-
-if __name__ == "__main__":
-    v, a, i, rep = fetch_assets_triplet()
-    print(f"Video: {v}\nAudio: {a}\nImage: {i}\nIs Repost: {rep}")
+    return sel_vid, sel_aud, sel_img, is_repost
