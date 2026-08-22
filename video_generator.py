@@ -1,6 +1,7 @@
 ﻿"""
 Calm Relaxation Video Generator Module
 - Removes watermarks dynamically based on video resolution / source
+- Auto-Upscales 720p videos to 1080p Full HD using high-fidelity Lanczos + Unsharp filtering
 - Ping-pong seamless 20s loop units
 - Audio track loop with end fade-out
 - Fast hardware-accelerated NVENC encoding
@@ -27,27 +28,36 @@ def get_media_info(file_path):
     height = int(v_stream['height']) if v_stream else 1080
     return width, height, duration
 
-def get_delogo_filter_for_video(width, height):
+def get_video_filter_chain(width, height, upscale_to_1080p=True):
     """
-    Returns optimal delogo filter coordinates based on resolution.
-    - 1080p (Gemini Flow 4-star icon): x=1700, y=840, w=90, h=95
-    - 720p (Grok Imagine logo & bar): x=1080, y=620, w=195, h=95
+    Returns optimal filter chain for watermark removal and optional 1080p upscaling.
     """
+    filters = []
+    
+    # 1. Delogo at native resolution
     if width == 1920 and height == 1080:
-        return "delogo=x=1700:y=840:w=90:h=95:show=0"
+        filters.append("delogo=x=1700:y=840:w=90:h=95:show=0")
     elif width == 1280 and height == 720:
-        return "delogo=x=1080:y=620:w=195:h=95:show=0"
+        # Gemini 720p star removal
+        filters.append("delogo=x=1130:y=555:w=65:h=70:show=0")
     else:
-        # Scale proportionally to bottom right
         rx = int(width * 0.88)
         ry = int(height * 0.82)
         rw = int(width * 0.10)
         rh = int(height * 0.10)
-        return f"delogo=x={rx}:y={ry}:w={rw}:h={rh}:show=0"
+        filters.append(f"delogo=x={rx}:y={ry}:w={rw}:h={rh}:show=0")
+        
+    # 2. High Quality 1080p Upscaling (if input is 720p or lower)
+    if upscale_to_1080p and (width < 1920 or height < 1080):
+        print(f"[VIDEO] Auto-upscaling from {width}x{height} to 1920x1080 Full HD (Lanczos + Unsharp)...")
+        filters.append("scale=1920:1080:flags=lanczos+accurate_rnd")
+        filters.append("unsharp=5:5:0.8:5:5:0.0")
+        
+    return ",".join(filters) if filters else "null"
 
-def build_calm_relaxation_video(input_video, input_audio, output_path, duration_seconds=3600, remove_watermark=True):
+def build_calm_relaxation_video(input_video, input_audio, output_path, duration_seconds=3600, remove_watermark=True, upscale_to_1080p=True):
     """
-    Main entry point to build a full 1-hour (or custom duration) HD video.
+    Main entry point to build a full 1-hour (or custom duration) 1080p HD video.
     """
     print(f"\n[VIDEO] Building Calm Relaxation Video...")
     print(f"  Input Video: {os.path.basename(input_video)}")
@@ -58,15 +68,9 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
     temp_clean = os.path.join(SCRIPT_DIR, "temp_clean.mp4")
     temp_block = os.path.join(SCRIPT_DIR, "temp_block.mp4")
 
-    # Step 1: Delogo clean
+    # Step 1: Delogo clean & Upscale
     w, h, orig_dur = get_media_info(input_video)
-    vf_list = []
-    if remove_watermark:
-        delogo_str = get_delogo_filter_for_video(w, h)
-        vf_list.append(delogo_str)
-        print(f"[VIDEO] Applied watermark removal: {delogo_str}")
-
-    vf_arg = ",".join(vf_list) if vf_list else "null"
+    vf_arg = get_video_filter_chain(w, h, upscale_to_1080p=upscale_to_1080p)
 
     cmd_clean = [
         'ffmpeg', '-y',
@@ -93,7 +97,7 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
     fade_start = max(0, duration_seconds - 3)
 
     # Step 3: Full assemble with audio loop and fade out
-    print(f"[VIDEO] Assembling full video with hardware acceleration...")
+    print(f"[VIDEO] Assembling full 1080p video with hardware acceleration...")
     cmd_full = [
         'ffmpeg', '-y',
         '-stream_loop', str(loop_count), '-i', temp_block,
@@ -126,5 +130,5 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
             except Exception:
                 pass
 
-    print(f"[SUCCESS] Video rendered successfully: {output_path}")
+    print(f"[SUCCESS] 1080p Video rendered successfully: {output_path}")
     return True
