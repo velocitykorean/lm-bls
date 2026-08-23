@@ -1,9 +1,10 @@
 ﻿"""
-Calm Relaxation YouTube Thumbnail Generator
-- Takes base nature / ambient background images
-- Adds elegant, minimal, high-CTR relaxation typography (Cinzel / Playfair)
-- Subtle atmospheric vignette & soft text glow
-- YouTube standard 1280x720 (16:9)
+Aesthetic YouTube Thumbnail Generator (LuminaBlooms)
+High-CTR, minimalist typography with enhanced contrast backing:
+- Serif luxury typography (Cinzel & PlayfairDisplay)
+- High-visibility golden glass badge (1 HOUR · 432Hz)
+- Directional contrast shadow gradient ensuring 100% legibility on mobile/desktop
+- 1280x720 16:9 output
 """
 
 import os
@@ -11,60 +12,36 @@ import sys
 import random
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 RELAXATION_HOOKS = [
-    {"main": "DEEP PEACE", "sub": "1 HOUR · 432Hz CALM"},
-    {"main": "CALM MIND", "sub": "INSTANT STRESS RELIEF"},
-    {"main": "DEEP SLEEP", "sub": "HEALING AMBIENCE"},
-    {"main": "INSTANT RELIEF", "sub": "RAIN & NATURE SOUNDS"},
-    {"main": "STILLNESS", "sub": "MEDITATION & RELAXATION"},
-    {"main": "SERENITY", "sub": "STOP OVERTHINKING"}
+    {"main": "DEEP PEACE", "sub": "Calm Relaxation & Sleep"},
+    {"main": "SLEEP INSTANTLY", "sub": "Deep Healing & Stress Relief"},
+    {"main": "CALM YOUR MIND", "sub": "432Hz Positive Energy"},
+    {"main": "QUIET STILLNESS", "sub": "Meditation & Anxiety Release"},
+    {"main": "NATURE EMBRACE", "sub": "Serene Ambient Soundscape"},
+    {"main": "VELVET SLUMBER", "sub": "Instant Stress & Insomnia Relief"},
+    {"main": "HEALING HARMONY", "sub": "Restorative Mind & Soul"}
 ]
 
-def get_font(font_name="Cinzel.ttf", size=56):
-    """Load font with project fallback hierarchy."""
+def get_font(font_name="Cinzel.ttf", size=48):
     font_path = os.path.join(SCRIPT_DIR, "assets", "fonts", font_name)
     if os.path.exists(font_path):
         try:
             return ImageFont.truetype(font_path, size)
         except Exception:
             pass
-            
-    # Fallback to Playfair
-    pf = os.path.join(SCRIPT_DIR, "assets", "fonts", "PlayfairDisplay.ttf")
-    if os.path.exists(pf):
-        try:
-            return ImageFont.truetype(pf, size)
-        except Exception:
-            pass
-
-    # Windows system fonts
-    for f in [r"C:\Windows\Fonts\georgiab.ttf", r"C:\Windows\Fonts\georgia.ttf", r"C:\Windows\Fonts\arialbd.ttf"]:
+    for f in [r"C:\Windows\Fonts\georgiab.ttf", r"C:\Windows\Fonts\georgia.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"]:
         if os.path.exists(f):
             try:
                 return ImageFont.truetype(f, size)
             except Exception:
                 pass
-
     return ImageFont.load_default()
 
-def apply_ambient_vignette(img, intensity=0.35):
-    """Applies a cinematic soft vignette to enhance text readability."""
-    W, H = img.size
-    mask = Image.new("L", (W, H), 0)
-    draw_m = ImageDraw.Draw(mask)
-    draw_m.ellipse([-W * 0.15, -H * 0.15, W * 1.15, H * 1.15], fill=int(255 * (1.0 - intensity)))
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=int(W * 0.07)))
-    dark = Image.new("RGBA", (W, H), (10, 15, 20, 255))
-    return Image.composite(img, dark, mask)
-
-def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=None, layout="bottom_left"):
+def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=None, badge_text="1 HOUR · 432Hz"):
     """
-    Creates a minimal, elegant relaxation thumbnail.
+    Creates an enhanced, high-contrast, elegant relaxation thumbnail.
     """
     if not main_text:
         preset = random.choice(RELAXATION_HOOKS)
@@ -89,62 +66,70 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
         
     img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
     
-    # Slight color boost for rich organic tones
-    enhancer = ImageEnhance.Color(img)
-    img = enhancer.enhance(1.08)
+    # 2. Rich color and contrast enhancement
+    img = ImageEnhance.Color(img).enhance(1.10)
+    img = ImageEnhance.Contrast(img).enhance(1.06)
     
-    # 2. Add subtle vignette
-    img = apply_ambient_vignette(img, intensity=0.30)
+    # 3. Soft directional gradient backing for maximum text contrast
+    shadow_mask = Image.new("L", (target_w, target_h), 0)
+    sdraw = ImageDraw.Draw(shadow_mask)
+    for x in range(0, 680, 10):
+        alpha = int((1.0 - (x / 680.0)**1.2) * 175)
+        sdraw.rectangle([x, 0, x + 10, target_h], fill=alpha)
+    shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(25))
+    dark_layer = Image.new("RGBA", (target_w, target_h), (8, 12, 16, 255))
+    img = Image.composite(dark_layer, img, shadow_mask)
     
-    # 3. Create text overlay
+    # 4. Draw overlays
     overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     
-    font_main = get_font("Cinzel.ttf", size=68)
-    font_sub = get_font("PlayfairDisplay.ttf", size=32)
-    font_badge = get_font("Cinzel.ttf", size=24)
+    font_main = get_font("Cinzel.ttf", size=88)
+    font_sub = get_font("Cinzel.ttf", size=36)
+    font_badge = get_font("Cinzel.ttf", size=32)
     
-    # Layout positioning (left-aligned with elegant margin)
+    # --- Top-Left High-Visibility Gold Badge ---
+    bx, by = 75, 55
+    bbox = draw.textbbox((0, 0), badge_text, font=font_badge)
+    bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad_x, pad_y = 22, 12
+    # Shadow
+    draw.rounded_rectangle([bx - pad_x + 2, by - pad_y + 3, bx + bw + pad_x + 2, by + bh + pad_y + 3], radius=10, fill=(0, 0, 0, 200))
+    # Pill with gold stroke
+    draw.rounded_rectangle([bx - pad_x, by - pad_y, bx + bw + pad_x, by + bh + pad_y], radius=10, fill=(16, 20, 26, 240), outline=(240, 205, 125, 255), width=2)
+    # Badge text
+    draw.text((bx, by), badge_text, font=font_badge, fill=(255, 245, 215, 255))
+    
+    # --- Bottom-Left Text Stack ---
     x_pos = 75
     y_base = target_h - 170
     
     # Subtitle / Category
     if sub_text:
-        # Subtle glowing line or tag
-        draw.text((x_pos + 1, y_base - 45 + 1), sub_text.upper(), font=font_badge, fill=(0, 0, 0, 180))
-        draw.text((x_pos, y_base - 45), sub_text.upper(), font=font_badge, fill=(240, 220, 180, 240))
-        # Small accent line
-        line_y = y_base - 18
-        draw.line([(x_pos, line_y), (x_pos + 200, line_y)], fill=(240, 220, 180, 180), width=2)
+        sub_y = y_base - 55
+        for dx, dy in [(-2,2), (2,2), (0,3), (3,3)]:
+            draw.text((x_pos + dx, sub_y + dy), sub_text.upper(), font=font_sub, fill=(0, 0, 0, 240))
+        draw.text((x_pos, sub_y), sub_text.upper(), font=font_sub, fill=(255, 218, 135, 255))
         
-    # Main Headline (White with soft dark drop shadow)
-    # Shadow pass
-    for dx, dy in [(-2,2), (2,2), (0,3), (3,3)]:
-        draw.text((x_pos + dx, y_base + dy), main_text.upper(), font=font_main, fill=(0, 0, 0, 200))
-    # Crisp white text
+        # Gold accent line
+        line_y = y_base - 14
+        draw.line([(x_pos, line_y), (x_pos + 300, line_y)], fill=(255, 218, 135, 230), width=3)
+        
+    # Main Headline (Multi-directional heavy drop shadow for 100% readability)
+    for dx, dy in [(-3,3), (3,3), (0,4), (4,4), (-2,0), (2,0), (0,-2), (0,2), (-3,-3), (3,-3)]:
+        draw.text((x_pos + dx, y_base + dy), main_text.upper(), font=font_main, fill=(0, 0, 0, 255))
     draw.text((x_pos, y_base), main_text.upper(), font=font_main, fill=(255, 255, 255, 255))
     
-    # Badge (e.g. 432Hz / 1 HOUR) in top right corner
-    badge_text = "1 HOUR · 432Hz"
-    bbox = draw.textbbox((0, 0), badge_text, font=font_badge)
-    bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    bx = target_w - bw - 75
-    by = 50
-    # Pill background for badge
-    padding = 12
-    draw.rounded_rectangle([bx - padding, by - padding, bx + bw + padding, by + bh + padding], radius=8, fill=(0, 0, 0, 130))
-    draw.text((bx, by), badge_text, font=font_badge, fill=(255, 245, 220, 240))
-    
-    # Merge overlay
+    # 5. Merge and save
     final = Image.alpha_composite(img, overlay).convert("RGB")
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    final.save(output_path, quality=95)
-    print(f"[+] Generated Relaxation Thumbnail: {output_path}")
+    final.save(output_path, quality=96)
+    print(f"[+] Generated High-Visibility Thumbnail: {output_path}")
     return output_path
 
 if __name__ == "__main__":
-    test_bg = os.path.join(SCRIPT_DIR, "input_images", "Hummingbird_Thumbnail_Base.jpg")
+    test_bg = os.path.join(SCRIPT_DIR, "input_images", "Emerald-green_hummingbird_in_forest_202608221441.jpeg")
     if not os.path.exists(test_bg):
-        test_bg = os.path.join(SCRIPT_DIR, "gemini_1080p_frame.png")
+        test_bg = os.path.join(SCRIPT_DIR, "input_images", "Hummingbird_Thumbnail_Base.jpg")
     test_out = os.path.join(SCRIPT_DIR, "output_thumbnails", "Test_Relaxation_Thumb.jpg")
     create_relaxation_thumbnail(test_bg, test_out, "DEEP PEACE", "CALM RELAXATION & SLEEP")
