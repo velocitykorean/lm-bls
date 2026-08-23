@@ -1,9 +1,9 @@
 ﻿"""
 Aesthetic YouTube Thumbnail Generator (LuminaBlooms)
 High-CTR, minimalist typography with enhanced contrast backing:
-- Serif luxury typography (Cinzel & PlayfairDisplay)
-- High-visibility golden glass badge (1 HOUR · 432Hz)
-- Directional contrast shadow gradient ensuring 100% legibility on mobile/desktop
+- Gold-framed pill badge for subtitle ("MEDITATION & RELAXATION") for 100% readability over flowers/bright backgrounds
+- Bold serif luxury headline ("STILLNESS" / "DEEP PEACE") with multi-pass shadow
+- Top gold accent badge ("1 HOUR · 432Hz")
 - 1280x720 16:9 output
 """
 
@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 RELAXATION_HOOKS = [
+    {"main": "STILLNESS", "sub": "Meditation & Relaxation"},
     {"main": "DEEP PEACE", "sub": "Calm Relaxation & Sleep"},
     {"main": "SLEEP INSTANTLY", "sub": "Deep Healing & Stress Relief"},
     {"main": "CALM YOUR MIND", "sub": "432Hz Positive Energy"},
@@ -24,14 +25,14 @@ RELAXATION_HOOKS = [
     {"main": "HEALING HARMONY", "sub": "Restorative Mind & Soul"}
 ]
 
-def get_font(font_name="Cinzel.ttf", size=48):
-    font_path = os.path.join(SCRIPT_DIR, "assets", "fonts", font_name)
-    if os.path.exists(font_path):
-        try:
-            return ImageFont.truetype(font_path, size)
-        except Exception:
-            pass
-    for f in [r"C:\Windows\Fonts\georgiab.ttf", r"C:\Windows\Fonts\georgia.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"]:
+def get_font(size=48):
+    fonts = [
+        os.path.join(SCRIPT_DIR, "assets", "fonts", "Cinzel.ttf"),
+        r"C:\Windows\Fonts\georgiab.ttf",
+        r"C:\Windows\Fonts\georgia.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+    ]
+    for f in fonts:
         if os.path.exists(f):
             try:
                 return ImageFont.truetype(f, size)
@@ -52,15 +53,12 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
     img = Image.open(bg_path).convert("RGBA")
     target_w, target_h = 1280, 720
     
-    img_ratio = img.width / img.height
-    target_ratio = target_w / target_h
-    
-    if img_ratio > target_ratio:
-        new_w = int(img.height * target_ratio)
+    if img.width / img.height > target_w / target_h:
+        new_w = int(img.height * (target_w / target_h))
         offset = (img.width - new_w) // 2
         img = img.crop((offset, 0, offset + new_w, img.height))
     else:
-        new_h = int(img.width / target_ratio)
+        new_h = int(img.width * (target_h / target_w))
         offset = (img.height - new_h) // 2
         img = img.crop((0, offset, img.width, offset + new_h))
         
@@ -71,53 +69,46 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
     img = ImageEnhance.Contrast(img).enhance(1.06)
     
     # 3. Soft directional gradient backing for maximum text contrast
-    shadow_mask = Image.new("L", (target_w, target_h), 0)
-    sdraw = ImageDraw.Draw(shadow_mask)
-    for x in range(0, 680, 10):
-        alpha = int((1.0 - (x / 680.0)**1.2) * 175)
-        sdraw.rectangle([x, 0, x + 10, target_h], fill=alpha)
-    shadow_mask = shadow_mask.filter(ImageFilter.GaussianBlur(25))
-    dark_layer = Image.new("RGBA", (target_w, target_h), (8, 12, 16, 255))
-    img = Image.composite(dark_layer, img, shadow_mask)
+    scrim = Image.new("L", (target_w, target_h), 0)
+    sdraw = ImageDraw.Draw(scrim)
+    for r in range(650, 0, -10):
+        alpha = int((1.0 - (r / 650.0)**1.2) * 190)
+        sdraw.ellipse([-150, target_h - 450, r * 1.8, target_h + 200], fill=alpha)
+    scrim = scrim.filter(ImageFilter.GaussianBlur(30))
+    dark_bg = Image.new("RGBA", (target_w, target_h), (6, 8, 12, 255))
+    img = Image.composite(dark_bg, img, scrim)
     
     # 4. Draw overlays
     overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     
-    font_main = get_font("Cinzel.ttf", size=88)
-    font_sub = get_font("Cinzel.ttf", size=36)
-    font_badge = get_font("Cinzel.ttf", size=32)
+    font_main = get_font(88)
+    font_sub = get_font(32)
+    font_badge = get_font(30)
     
     # --- Top-Left High-Visibility Gold Badge ---
-    bx, by = 75, 55
-    bbox = draw.textbbox((0, 0), badge_text, font=font_badge)
-    bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    pad_x, pad_y = 22, 12
-    # Shadow
-    draw.rounded_rectangle([bx - pad_x + 2, by - pad_y + 3, bx + bw + pad_x + 2, by + bh + pad_y + 3], radius=10, fill=(0, 0, 0, 200))
-    # Pill with gold stroke
-    draw.rounded_rectangle([bx - pad_x, by - pad_y, bx + bw + pad_x, by + bh + pad_y], radius=10, fill=(16, 20, 26, 240), outline=(240, 205, 125, 255), width=2)
-    # Badge text
-    draw.text((bx, by), badge_text, font=font_badge, fill=(255, 245, 215, 255))
+    bx, by = 65, 45
+    draw.rounded_rectangle([bx + 2, by + 3, bx + 250 + 2, by + 46 + 3], radius=10, fill=(0, 0, 0, 180))
+    draw.rounded_rectangle([bx, by, bx + 250, by + 46], radius=10, fill=(14, 18, 24, 240), outline=(240, 205, 125, 255), width=2)
+    draw.text((bx + 20, by + 8), badge_text, font=font_badge, fill=(255, 245, 215, 255))
     
     # --- Bottom-Left Text Stack ---
-    x_pos = 75
+    x_pos = 65
     y_base = target_h - 170
+    sub_y = y_base - 56
     
-    # Subtitle / Category
+    # Subtitle Pill Tag (Ensures 100% readability over flowers & bright colors)
     if sub_text:
-        sub_y = y_base - 55
-        for dx, dy in [(-2,2), (2,2), (0,3), (3,3)]:
-            draw.text((x_pos + dx, sub_y + dy), sub_text.upper(), font=font_sub, fill=(0, 0, 0, 240))
-        draw.text((x_pos, sub_y), sub_text.upper(), font=font_sub, fill=(255, 218, 135, 255))
+        s_bbox = draw.textbbox((0, 0), sub_text.upper(), font=font_sub)
+        sw, sh = s_bbox[2] - s_bbox[0], s_bbox[3] - s_bbox[1]
+        draw.rounded_rectangle([x_pos - 12, sub_y - 6, x_pos + sw + 16, sub_y + sh + 8], radius=8, fill=(14, 18, 24, 235), outline=(240, 205, 125, 255), width=2)
+        draw.text((x_pos + 2, sub_y), sub_text.upper(), font=font_sub, fill=(255, 225, 140, 255))
         
-        # Gold accent line
-        line_y = y_base - 14
-        draw.line([(x_pos, line_y), (x_pos + 300, line_y)], fill=(255, 218, 135, 230), width=3)
-        
-    # Main Headline (Multi-directional heavy drop shadow for 100% readability)
-    for dx, dy in [(-3,3), (3,3), (0,4), (4,4), (-2,0), (2,0), (0,-2), (0,2), (-3,-3), (3,-3)]:
-        draw.text((x_pos + dx, y_base + dy), main_text.upper(), font=font_main, fill=(0, 0, 0, 255))
+    # Main Headline (Multi-directional heavy drop shadow for crisp white typography)
+    for dx in range(-4, 5):
+        for dy in range(-4, 5):
+            if dx*dx + dy*dy <= 16:
+                draw.text((x_pos + dx, y_base + dy), main_text.upper(), font=font_main, fill=(0, 0, 0, 255))
     draw.text((x_pos, y_base), main_text.upper(), font=font_main, fill=(255, 255, 255, 255))
     
     # 5. Merge and save
@@ -128,8 +119,6 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
     return output_path
 
 if __name__ == "__main__":
-    test_bg = os.path.join(SCRIPT_DIR, "input_images", "Emerald-green_hummingbird_in_forest_202608221441.jpeg")
-    if not os.path.exists(test_bg):
-        test_bg = os.path.join(SCRIPT_DIR, "input_images", "Hummingbird_Thumbnail_Base.jpg")
+    test_bg = os.path.join(SCRIPT_DIR, "input_images", "Hummingbird_Thumbnail_Base.jpg")
     test_out = os.path.join(SCRIPT_DIR, "output_thumbnails", "Test_Relaxation_Thumb.jpg")
-    create_relaxation_thumbnail(test_bg, test_out, "DEEP PEACE", "CALM RELAXATION & SLEEP")
+    create_relaxation_thumbnail(test_bg, test_out, "STILLNESS", "MEDITATION & RELAXATION")
