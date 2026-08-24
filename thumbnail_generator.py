@@ -1,6 +1,7 @@
 ﻿"""
 Aesthetic YouTube Thumbnail Generator (LuminaBlooms)
 High-CTR, minimalist typography with thick, high-visibility letterforms:
+- Auto-removes bottom-right AI watermarks (Gemini 4-point star / Grok logo) via seamless inpainting
 - Ultra-bold luxury serif typography (Cinzel-Black) for maximum clarity on mobile
 - Solid white thick headline ("STILLNESS" / "DEEP PEACE")
 - Warm gold thick subtitle ("MEDITATION & RELAXATION")
@@ -12,7 +13,14 @@ High-CTR, minimalist typography with thick, high-visibility letterforms:
 import os
 import sys
 import random
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -44,6 +52,24 @@ def get_font(font_name="Cinzel-Black.ttf", size=48):
                 pass
     return ImageFont.load_default()
 
+def remove_thumbnail_watermark(pil_img):
+    """Seamlessly inpaints and removes any AI watermark in the bottom-right corner."""
+    if not CV2_AVAILABLE:
+        return pil_img
+    try:
+        cv_img = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+        h, w = cv_img.shape[:2]
+        
+        # Mask bottom-right watermark region
+        mask = np.zeros((h, w), dtype=np.uint8)
+        mask[int(h * 0.76):int(h * 0.94), int(w * 0.86):int(w * 0.98)] = 255
+        
+        inpainted = cv2.inpaint(cv_img, mask, inpaintRadius=7, flags=cv2.INPAINT_TELEA)
+        return Image.fromarray(cv2.cvtColor(inpainted, cv2.COLOR_BGR2RGB)).convert("RGBA")
+    except Exception as e:
+        print(f"[WARN] Watermark inpainting skipped: {e}")
+        return pil_img
+
 def draw_cinematic_text(draw_target, pos, text, font, fill_color, shadow_blur=10, shadow_offset=(3, 5), shadow_opacity=230):
     """
     Renders text with a smooth Gaussian ambient shadow + directional drop shadow.
@@ -70,7 +96,7 @@ def draw_cinematic_text(draw_target, pos, text, font, fill_color, shadow_blur=10
 
 def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=None, badge_text="1 HOUR · 432Hz"):
     """
-    Creates a clean, thick-font minimalist relaxation thumbnail.
+    Creates a clean, thick-font minimalist relaxation thumbnail with watermark removal.
     """
     if not main_text:
         preset = random.choice(RELAXATION_HOOKS)
@@ -92,11 +118,14 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
         
     img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
     
-    # 2. Rich color and contrast enhancement
+    # 2. Seamlessly remove bottom-right AI watermark (Gemini star / Grok)
+    img = remove_thumbnail_watermark(img)
+    
+    # 3. Rich color and contrast enhancement
     img = ImageEnhance.Color(img).enhance(1.08)
     img = ImageEnhance.Contrast(img).enhance(1.04)
     
-    # 3. Smooth natural ambient dark shadow behind text area
+    # 4. Smooth natural ambient dark shadow behind text area
     scrim = Image.new("L", (target_w, target_h), 0)
     sdraw = ImageDraw.Draw(scrim)
     # Bottom-left text area smooth shadow
@@ -139,7 +168,7 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
     final = canvas.convert("RGB")
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     final.save(output_path, quality=96)
-    print(f"[+] Generated Thick-Font Thumbnail: {output_path}")
+    print(f"[+] Generated Watermark-Free Thick Thumbnail: {output_path}")
     return output_path
 
 if __name__ == "__main__":
