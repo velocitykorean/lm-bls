@@ -1,10 +1,12 @@
 ﻿"""
 Aesthetic YouTube Thumbnail Generator (LuminaBlooms)
-High-CTR, minimalist typography with clean organic aesthetics:
+High-CTR, minimalist typography with cinematic organic aesthetics:
 - Zero container boxes or artificial borders
-- Bold luxury serif typography (Cinzel) with deep multi-pass shadows
+- Zero underline lines
+- Smooth Gaussian ambient drop shadows (eliminates all harsh thick/jagged pixel borders)
+- Large luxury serif typography (Cinzel) for maximum mobile & desktop clarity
 - Top-Right corner badge ("1 HOUR · 432Hz")
-- Warm champagne gold subtitle with elegant accent divider line
+- Warm champagne gold subtitle with crisp white headline
 - 1280x720 16:9 output
 """
 
@@ -41,6 +43,31 @@ def get_font(font_name="Cinzel.ttf", size=48):
                 pass
     return ImageFont.load_default()
 
+def draw_cinematic_text(draw_target, pos, text, font, fill_color, shadow_blur=8, shadow_offset=(3, 5), shadow_opacity=220):
+    """
+    Renders text with a smooth Gaussian ambient shadow + directional drop shadow.
+    Eliminates all thick, jagged, blocky black outlines.
+    """
+    w, h = draw_target.size
+    shadow_layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    s_draw = ImageDraw.Draw(shadow_layer)
+    
+    # 1. Ambient soft shadow
+    s_draw.text(pos, text, font=font, fill=(0, 0, 0, shadow_opacity))
+    # 2. Directional offset shadow
+    ox, oy = shadow_offset
+    s_draw.text((pos[0] + ox, pos[1] + oy), text, font=font, fill=(0, 0, 0, int(shadow_opacity * 0.9)))
+    
+    # Gaussian blur for butter-smooth natural shadow
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(shadow_blur))
+    draw_target.alpha_composite(shadow_layer)
+    
+    # Draw crisp, clean text on top
+    text_layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    t_draw = ImageDraw.Draw(text_layer)
+    t_draw.text(pos, text, font=font, fill=fill_color)
+    draw_target.alpha_composite(text_layer)
+
 def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=None, badge_text="1 HOUR · 432Hz"):
     """
     Creates a clean, box-free minimalist relaxation thumbnail.
@@ -66,76 +93,61 @@ def create_relaxation_thumbnail(bg_path, output_path, main_text=None, sub_text=N
     img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
     
     # 2. Rich color and contrast enhancement
-    img = ImageEnhance.Color(img).enhance(1.10)
-    img = ImageEnhance.Contrast(img).enhance(1.05)
+    img = ImageEnhance.Color(img).enhance(1.08)
+    img = ImageEnhance.Contrast(img).enhance(1.04)
     
     # 3. Smooth natural ambient dark shadow behind text area (seamless, zero boxes)
     scrim = Image.new("L", (target_w, target_h), 0)
     sdraw = ImageDraw.Draw(scrim)
     # Bottom-left text area smooth shadow
-    for r in range(650, 0, -10):
-        alpha = int((1.0 - (r / 650.0)**1.3) * 190)
-        sdraw.ellipse([-150, target_h - 450, r * 1.8, target_h + 200], fill=alpha)
+    for r in range(600, 0, -10):
+        alpha = int((1.0 - (r / 600.0)**1.4) * 160)
+        sdraw.ellipse([-120, target_h - 420, r * 1.8, target_h + 180], fill=alpha)
     # Top-right corner smooth shadow
     for r in range(350, 0, -10):
-        alpha = int((1.0 - (r / 350.0)**1.3) * 150)
-        sdraw.ellipse([target_w - r * 1.6, -100, target_w + 100, r * 1.2], fill=alpha)
-    scrim = scrim.filter(ImageFilter.GaussianBlur(35))
-    dark_bg = Image.new("RGBA", (target_w, target_h), (8, 10, 14, 255))
-    img = Image.composite(dark_bg, img, scrim)
+        alpha = int((1.0 - (r / 350.0)**1.4) * 130)
+        sdraw.ellipse([target_w - r * 1.5, -80, target_w + 80, r * 1.2], fill=alpha)
+    scrim = scrim.filter(ImageFilter.GaussianBlur(40))
+    dark_bg = Image.new("RGBA", (target_w, target_h), (6, 8, 12, 255))
+    canvas = Image.composite(dark_bg, img, scrim)
     
-    # 4. Draw pure typography overlays
-    overlay = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    font_main = get_font("Cinzel.ttf", size=96)
+    font_sub = get_font("Cinzel.ttf", size=38)
+    font_badge = get_font("Cinzel.ttf", size=34)
     
-    font_main = get_font("Cinzel.ttf", size=92)
-    font_sub = get_font("Cinzel.ttf", size=40)
-    font_badge = get_font("Cinzel.ttf", size=36)
-    
-    # --- Top-Right Badge (Pure Typography) ---
-    bbox = draw.textbbox((0, 0), badge_text, font=font_badge)
-    bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    # --- 1. TOP-RIGHT BADGE ---
+    dummy = ImageDraw.Draw(canvas)
+    bbox = dummy.textbbox((0, 0), badge_text, font=font_badge)
+    bw = bbox[2] - bbox[0]
     bx = target_w - bw - 75
     by = 50
-    for dx in range(-3, 4):
-        for dy in range(-3, 4):
-            if dx*dx + dy*dy <= 9:
-                draw.text((bx + dx, by + dy), badge_text, font=font_badge, fill=(0, 0, 0, 240))
-    draw.text((bx, by), badge_text, font=font_badge, fill=(255, 240, 205, 255))
+    draw_cinematic_text(canvas, (bx, by), badge_text, font_badge, fill_color=(255, 242, 215, 255), shadow_blur=6, shadow_offset=(2, 4))
     
-    # --- Bottom-Left Text Stack ---
+    # --- 2. BOTTOM-LEFT TEXT STACK (No underline, perfectly smooth cinematic glow) ---
     x_pos = 75
     y_base = target_h - 165
-    sub_y = y_base - 62
+    sub_y = y_base - 56
     
-    # Subtitle (Large, warm champagne gold with multi-pass shadow)
+    # Subtitle (Warm Champagne Gold)
     if sub_text:
-        for dx in range(-3, 4):
-            for dy in range(-3, 4):
-                if dx*dx + dy*dy <= 9:
-                    draw.text((x_pos + dx, sub_y + dy), sub_text.upper(), font=font_sub, fill=(0, 0, 0, 245))
-        draw.text((x_pos, sub_y), sub_text.upper(), font=font_sub, fill=(255, 222, 145, 255))
+        draw_cinematic_text(canvas, (x_pos, sub_y), sub_text.upper(), font_sub, fill_color=(255, 225, 145, 255), shadow_blur=6, shadow_offset=(2, 3))
         
-        # Subtle gold accent line
-        line_y = y_base - 14
-        line_w = max(320, int(len(sub_text) * 16))
-        draw.line([(x_pos, line_y), (x_pos + line_w, line_y)], fill=(255, 222, 145, 220), width=3)
-    
-    # Main Headline (Large, crisp pure white with heavy multi-pass shadow)
-    for dx in range(-4, 5):
-        for dy in range(-4, 5):
-            if dx*dx + dy*dy <= 16:
-                draw.text((x_pos + dx, y_base + dy), main_text.upper(), font=font_main, fill=(0, 0, 0, 255))
-    draw.text((x_pos, y_base), main_text.upper(), font=font_main, fill=(255, 255, 255, 255))
+    # Main Headline (Crisp Pure White)
+    draw_cinematic_text(canvas, (x_pos, y_base), main_text.upper(), font_main, fill_color=(255, 255, 255, 255), shadow_blur=10, shadow_offset=(3, 5))
     
     # 5. Merge and save
-    final = Image.alpha_composite(img, overlay).convert("RGB")
+    final = canvas.convert("RGB")
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     final.save(output_path, quality=96)
-    print(f"[+] Generated Clean Aesthetic Thumbnail: {output_path}")
+    print(f"[+] Generated Beautiful Thumbnail: {output_path}")
     return output_path
 
 if __name__ == "__main__":
-    test_bg = os.path.join(SCRIPT_DIR, "input_images", "Hummingbird_Thumbnail_Base.jpg")
-    test_out = os.path.join(SCRIPT_DIR, "output_thumbnails", "Test_Relaxation_Thumb.jpg")
-    create_relaxation_thumbnail(test_bg, test_out, "STILLNESS", "MEDITATION & RELAXATION")
+    img_red = os.path.join(SCRIPT_DIR, "input_images", "Hummingbird_Thumbnail_Base.jpg")
+    img_forest = os.path.join(SCRIPT_DIR, "input_images", "Emerald-green_hummingbird_in_forest_202608221441.jpeg")
+
+    out_red = os.path.join(SCRIPT_DIR, "output_thumbnails", "LuminaBlooms_RedHibiscus.jpg")
+    out_forest = os.path.join(SCRIPT_DIR, "output_thumbnails", "LuminaBlooms_ForestEmerald.jpg")
+
+    create_relaxation_thumbnail(img_red, out_red, "STILLNESS", "MEDITATION & RELAXATION")
+    create_relaxation_thumbnail(img_forest, out_forest, "DEEP PEACE", "CALM RELAXATION & SLEEP")
