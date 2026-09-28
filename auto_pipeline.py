@@ -1,4 +1,4 @@
-﻿"""
+"""
 Calm Relaxation YouTube Automation Pipeline
 Full End-to-End Orchestrator:
 1. Fetches Video, Audio, Image triplets from Google Drive (or local folders)
@@ -38,14 +38,17 @@ def get_published_history():
             return []
     return []
 
-def save_published_entry(video_name, audio_name, image_name, yt_video_id=None, title=""):
+def save_published_entry(video_name, audio_name, image_name, yt_video_id=None, fb_video_id=None, title=""):
     history = get_published_history()
+    fb_page_id = os.getenv("FB_PAGE_ID", "1278026508735006")
     entry = {
         "video_file": os.path.basename(video_name),
         "audio_file": os.path.basename(audio_name),
         "image_file": os.path.basename(image_name) if image_name else "",
         "youtube_id": yt_video_id,
         "youtube_url": f"https://youtu.be/{yt_video_id}" if yt_video_id else "LOCAL_RENDER",
+        "facebook_id": fb_video_id,
+        "facebook_url": f"https://www.facebook.com/{fb_page_id}/videos/{fb_video_id}" if fb_video_id else None,
         "title": title,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
@@ -151,23 +154,34 @@ def run_pipeline(duration=3600, dry_run=False):
     if dry_run:
         print(f"\n[DRY RUN] Finished. Video saved at: {final_video_path}")
         print(f"[DRY RUN] Thumbnail saved at: {thumb_output}")
-        save_published_entry(vid_path, aud_path, img_path, yt_video_id=None, title=title)
+        save_published_entry(vid_path, aud_path, img_path, yt_video_id=None, fb_video_id=None, title=title)
         return True
         
-    # Optional Step 5: Upload to YouTube if publish_youtube exists
+    # Step 5: Upload to Platforms (YouTube & Facebook)
+    yt_video_id = None
     try:
         from publish_youtube import upload_to_youtube, set_video_thumbnail
         print(f"\n[STEP 5] Uploading to YouTube...")
-        video_id = upload_to_youtube(final_video_path, title, desc, tags=tags)
-        if video_id:
-            set_video_thumbnail(video_id, thumb_output)
-            save_published_entry(vid_path, aud_path, img_path, yt_video_id=video_id, title=title)
-            print(f"🎉 SUCCESS! Published to YouTube: https://youtu.be/{video_id}")
-            return True
+        yt_video_id = upload_to_youtube(final_video_path, title, desc, tags=tags)
+        if yt_video_id:
+            set_video_thumbnail(yt_video_id, thumb_output)
+            print(f"🎉 SUCCESS! Published to YouTube: https://youtu.be/{yt_video_id}")
     except Exception as e:
         print(f"[YOUTUBE NOTE] YouTube API upload skipped or not configured ({e}). Video is ready in output_videos/")
-        save_published_entry(vid_path, aud_path, img_path, yt_video_id=None, title=title)
-        return True
+
+    # Facebook Page Upload
+    fb_video_id = None
+    try:
+        from publish_facebook import upload_to_facebook
+        print(f"\n[facebook] Uploading to Facebook Page Lumina Blooms...")
+        fb_res = upload_to_facebook(final_video_path, title, desc)
+        fb_video_id = fb_res.get("id")
+        print(f"🎉 SUCCESS! Published to Facebook: {fb_video_id}")
+    except Exception as e_fb:
+        print(f"[FACEBOOK NOTE] Facebook upload skipped or encountered error: {e_fb}")
+
+    save_published_entry(vid_path, aud_path, img_path, yt_video_id=yt_video_id, fb_video_id=fb_video_id, title=title)
+    return True
 
 if __name__ == "__main__":
     dur = 3600
