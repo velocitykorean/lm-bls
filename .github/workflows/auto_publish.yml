@@ -6,6 +6,15 @@ on:
     - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
+      upload_youtube:
+        description: 'Upload to YouTube? (auto = alternate days, true = force upload, false = skip)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - 'true'
+          - 'false'
       duration:
         description: 'Video duration in seconds (default 3600 = 1 hour)'
         required: false
@@ -61,15 +70,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: 📅 Check YouTube upload schedule (Alternate days)
+        id: yt_schedule
+        run: |
+          INPUT_CHOICE="${{ github.event.inputs.upload_youtube }}"
+          if [ "$INPUT_CHOICE" = "true" ]; then
+            echo "should_upload=true" >> "$GITHUB_OUTPUT"
+            echo "Manual override: YouTube upload forced to TRUE."
+          elif [ "$INPUT_CHOICE" = "false" ]; then
+            echo "should_upload=false" >> "$GITHUB_OUTPUT"
+            echo "Manual override: YouTube upload forced to FALSE."
+          else
+            # Alternate-day schedule based on UTC Day of the Year
+            # Odd days (e.g. 283, 285...) = Upload to YouTube
+            # Even days (e.g. 284, 286...) = Skip YouTube (1-day gap)
+            DAY_OF_YEAR=$(date -u +%-j)
+            echo "Current UTC Day of Year: $DAY_OF_YEAR"
+            if [ $(( 10#$DAY_OF_YEAR % 2 )) -ne 0 ]; then
+              echo "should_upload=true" >> "$GITHUB_OUTPUT"
+              echo "✅ Today is a scheduled YouTube upload day (Day $DAY_OF_YEAR)."
+            else
+              echo "should_upload=false" >> "$GITHUB_OUTPUT"
+              echo "⏸️ Today is an alternate off-day for YouTube (Day $DAY_OF_YEAR). Skipping YouTube upload (Facebook will still upload)."
+            fi
+          fi
+
       - name: Run automation pipeline
+        env:
+          UPLOAD_YOUTUBE: ${{ steps.yt_schedule.outputs.should_upload }}
         run: |
           echo "Starting LuminaBlooms publishing pipeline..."
+          echo "Upload to YouTube today: $UPLOAD_YOUTUBE"
           DURATION="${{ github.event.inputs.duration || '3600' }}"
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
           python auto_pipeline.py --duration "$DURATION" $DRY_RUN_FLAG
+          exit_code=$?
+          if [ $exit_code -ne 0 ]; then
+            echo "Pipeline failed with exit code $exit_code"
+            exit $exit_code
+          fi
+          echo "Pipeline completed successfully."
 
       - name: Commit published videos log
         if: always()
