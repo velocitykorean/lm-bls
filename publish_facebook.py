@@ -21,8 +21,8 @@ if sys.platform == 'win32':
 load_dotenv()
 
 GRAPH_API_VERSION = "v21.0"
-# 50 MB chunks: reduces API calls from 600+ down to ~20 requests for a 1-hour video
-CHUNK_SIZE = 50 * 1024 * 1024
+# 500 MB chunks: reduces total API calls from 650 down to ~5 calls for a 2.5 GB video
+CHUNK_SIZE = 500 * 1024 * 1024
 
 
 def get_facebook_credentials():
@@ -144,7 +144,7 @@ def upload_video_resumable(video_path, title, description, page_id, access_token
                         "video_file_chunk": ("chunk.mp4", chunk_data, "video/mp4")
                     }
 
-                    t_resp = requests.post(transfer_url, data=transfer_data, files=transfer_files, timeout=180)
+                    t_resp = requests.post(transfer_url, data=transfer_data, files=transfer_files, timeout=600)
 
                     if t_resp.status_code == 200:
                         t_data = t_resp.json()
