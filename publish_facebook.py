@@ -21,8 +21,8 @@ if sys.platform == 'win32':
 load_dotenv()
 
 GRAPH_API_VERSION = "v21.0"
-# 20 MB chunks: balances upload speed and reduces request volume by 5x compared to 4MB chunks
-CHUNK_SIZE = 20 * 1024 * 1024
+# 50 MB chunks: reduces API calls from 600+ down to ~20 requests for a 1-hour video
+CHUNK_SIZE = 50 * 1024 * 1024
 
 
 def get_facebook_credentials():
@@ -149,12 +149,9 @@ def upload_video_resumable(video_path, title, description, page_id, access_token
                     if t_resp.status_code == 200:
                         t_data = t_resp.json()
                         new_start = int(t_data.get("start_offset", start_offset + len(chunk_data)))
-                        if "end_offset" in t_data:
-                            server_chunk = int(t_data["end_offset"]) - new_start
-                            if 5 * 1024 * 1024 <= server_chunk <= 40 * 1024 * 1024:
-                                chunk_size = server_chunk
                         start_offset = new_start
                         chunk_success = True
+                        time.sleep(1)  # 1-second pause to prevent hammering the API
                         break
                     else:
                         print(f"[facebook] Chunk error at offset {start_offset} (HTTP {t_resp.status_code}, attempt {attempt}/{max_chunk_retries}): {t_resp.text}")
