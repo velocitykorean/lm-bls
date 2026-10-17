@@ -1,11 +1,13 @@
 """
 Facebook Page Video Upload Script for LuminaBlooms
 Uses Facebook Graph API to upload calm relaxation videos to the Lumina Blooms Facebook Page.
-Supports chunked resumable upload for large video files.
+Supports chunked resumable upload for large video files with automatic retries,
+exponential backoff, and offset recovery.
 """
 import os
 import sys
 import json
+import time
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
@@ -18,7 +20,9 @@ if sys.platform == 'win32':
 
 load_dotenv()
 
-GRAPH_API_VERSION = "v20.0"
+GRAPH_API_VERSION = "v21.0"
+# 20 MB chunks: balances upload speed and reduces request volume by 5x compared to 4MB chunks
+CHUNK_SIZE = 20 * 1024 * 1024
 
 
 def get_facebook_credentials():
@@ -51,10 +55,33 @@ def get_facebook_credentials():
     return page_id, access_token
 
 
+def query_session_offset(upload_session_id, page_id, access_token):
+    """Queries Meta Graph API to find the current acknowledged start_offset for this upload session."""
+    try:
+        url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{page_id}/videos"
+        params = {
+            "upload_phase": "transfer",
+            "upload_session_id": upload_session_id,
+            "access_token": access_token
+        }
+        resp = requests.get(url, params=params, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "start_offset" in data:
+                return int(data["start_offset"])
+    except Exception as e:
+        print(f"[facebook] Note: could not query session offset: {e}")
+    return None
+
+
 def upload_video_resumable(video_path, title, description, page_id, access_token):
     """
     Upload video using Meta Graph API chunked resumable upload protocol.
-    Recommended for reliable uploads of video files of any size.
+    Features:
+    - 20MB chunking to prevent server timeouts and reduce API request count.
+    - Automatic retry with exponential backoff on HTTP 500, network errors, or rate limits.
+    - Offset recovery querying Meta if an upload chunk is interrupted.
+    - Multi-attempt finalize phase.
     """
     file_size = os.path.getsize(video_path)
     print(f"[facebook] Starting resumable upload for '{title}' ({file_size / (1024 * 1024):.2f} MB)...")
@@ -66,48 +93,91 @@ def upload_video_resumable(video_path, title, description, page_id, access_token
         "file_size": file_size,
         "access_token": access_token
     }
-    resp = requests.post(start_url, data=start_payload)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Resumable upload START failed ({resp.status_code}): {resp.text}")
 
-    start_data = resp.json()
-    upload_session_id = start_data["upload_session_id"]
-    video_id = start_data.get("video_id")
-    start_offset = int(start_data.get("start_offset", 0))
-    end_offset = int(start_data.get("end_offset", 0))
+    start_resp = None
+    for s_attempt in range(1, 4):
+        try:
+            resp = requests.post(start_url, data=start_payload, timeout=60)
+            if resp.status_code == 200:
+                start_resp = resp.json()
+                break
+            else:
+                print(f"[facebook] Start phase attempt {s_attempt} failed ({resp.status_code}): {resp.text}")
+        except Exception as e:
+            print(f"[facebook] Start phase attempt {s_attempt} error: {e}")
+        time.sleep(3 * s_attempt)
+
+    if not start_resp or "upload_session_id" not in start_resp:
+        raise RuntimeError("Resumable upload START phase failed to obtain upload_session_id.")
+
+    upload_session_id = start_resp["upload_session_id"]
+    video_id = start_resp.get("video_id")
+    start_offset = int(start_resp.get("start_offset", 0))
+
+    print(f"[facebook] Session initialized (Session ID: {upload_session_id[:10]}...)")
 
     # Phase 2: TRANSFER CHUNKS
-    chunk_size = end_offset - start_offset if end_offset > start_offset else (4 * 1024 * 1024)
+    chunk_size = CHUNK_SIZE
+    max_chunk_retries = 5
+
     with open(video_path, "rb") as f:
         while start_offset < file_size:
-            f.seek(start_offset)
-            chunk_data = f.read(chunk_size)
-            if not chunk_data:
-                break
+            pct = min(100, int((start_offset / file_size) * 100))
+            print(f"[facebook] Upload progress: {pct}% (offset {start_offset:,} / {file_size:,} bytes)")
 
-            transfer_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{page_id}/videos"
-            transfer_data = {
-                "upload_phase": "transfer",
-                "upload_session_id": upload_session_id,
-                "start_offset": start_offset,
-                "access_token": access_token
-            }
-            transfer_files = {
-                "video_file_chunk": ("chunk.mp4", chunk_data, "video/mp4")
-            }
+            chunk_success = False
+            for attempt in range(1, max_chunk_retries + 1):
+                try:
+                    f.seek(start_offset)
+                    chunk_data = f.read(chunk_size)
+                    if not chunk_data:
+                        break
 
-            t_resp = requests.post(transfer_url, data=transfer_data, files=transfer_files)
-            if t_resp.status_code != 200:
-                raise RuntimeError(f"Resumable upload TRANSFER failed at offset {start_offset} ({t_resp.status_code}): {t_resp.text}")
+                    transfer_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{page_id}/videos"
+                    transfer_data = {
+                        "upload_phase": "transfer",
+                        "upload_session_id": upload_session_id,
+                        "start_offset": start_offset,
+                        "access_token": access_token
+                    }
+                    transfer_files = {
+                        "video_file_chunk": ("chunk.mp4", chunk_data, "video/mp4")
+                    }
 
-            t_data = t_resp.json()
-            new_start = int(t_data.get("start_offset", start_offset + len(chunk_data)))
-            new_end = int(t_data.get("end_offset", new_start + chunk_size))
-            chunk_size = new_end - new_start if new_end > new_start else chunk_size
+                    t_resp = requests.post(transfer_url, data=transfer_data, files=transfer_files, timeout=180)
 
-            pct = min(100, int((new_start / file_size) * 100))
-            print(f"[facebook] Upload progress: {pct}%")
-            start_offset = new_start
+                    if t_resp.status_code == 200:
+                        t_data = t_resp.json()
+                        new_start = int(t_data.get("start_offset", start_offset + len(chunk_data)))
+                        if "end_offset" in t_data:
+                            server_chunk = int(t_data["end_offset"]) - new_start
+                            if 5 * 1024 * 1024 <= server_chunk <= 40 * 1024 * 1024:
+                                chunk_size = server_chunk
+                        start_offset = new_start
+                        chunk_success = True
+                        break
+                    else:
+                        print(f"[facebook] Chunk error at offset {start_offset} (HTTP {t_resp.status_code}, attempt {attempt}/{max_chunk_retries}): {t_resp.text}")
+                except Exception as exc:
+                    print(f"[facebook] Chunk exception at offset {start_offset} (attempt {attempt}/{max_chunk_retries}): {exc}")
+
+                if attempt < max_chunk_retries:
+                    backoff = 4 * (2 ** (attempt - 1))  # 4s, 8s, 16s, 32s
+                    print(f"[facebook] Waiting {backoff}s before retrying chunk at offset {start_offset}...")
+                    time.sleep(backoff)
+
+                    # Check if Facebook acknowledged partial or full chunk
+                    queried_offset = query_session_offset(upload_session_id, page_id, access_token)
+                    if queried_offset is not None and queried_offset > start_offset:
+                        print(f"[facebook] Recovered offset from Meta: {queried_offset:,} (was {start_offset:,})")
+                        start_offset = queried_offset
+                        chunk_success = True
+                        break
+
+            if not chunk_success:
+                raise RuntimeError(f"Resumable upload TRANSFER failed at offset {start_offset} after {max_chunk_retries} attempts.")
+
+    print(f"[facebook] Upload progress: 100% - All chunks transferred!")
 
     # Phase 3: FINISH
     print("[facebook] Finalizing video processing with title & description...")
@@ -119,19 +189,31 @@ def upload_video_resumable(video_path, title, description, page_id, access_token
         "description": description,
         "access_token": access_token
     }
-    f_resp = requests.post(finish_url, data=finish_payload)
-    if f_resp.status_code != 200:
-        raise RuntimeError(f"Resumable upload FINISH failed ({f_resp.status_code}): {f_resp.text}")
 
-    result = f_resp.json()
-    final_video_id = result.get("id") or video_id
-    print(f"[facebook] Video uploaded successfully! Video ID: {final_video_id}")
-    print(f"[facebook] Watch URL: https://www.facebook.com/{page_id}/videos/{final_video_id}")
-    return {"id": final_video_id, "success": True, "data": result}
+    finish_data = None
+    for f_attempt in range(1, 6):
+        try:
+            f_resp = requests.post(finish_url, data=finish_payload, timeout=90)
+            if f_resp.status_code == 200:
+                finish_data = f_resp.json()
+                break
+            else:
+                print(f"[facebook] Finish phase attempt {f_attempt} returned {f_resp.status_code}: {f_resp.text}")
+        except Exception as e:
+            print(f"[facebook] Finish phase attempt {f_attempt} exception: {e}")
+        time.sleep(10)
+
+    if not finish_data:
+        raise RuntimeError("Resumable upload FINISH failed: could not finalize video upload with Meta.")
+
+    final_video_id = finish_data.get("id") or video_id
+    print(f"🎉 [facebook] Video uploaded successfully! Video ID: {final_video_id}")
+    print(f"🎉 [facebook] Watch URL: https://www.facebook.com/{page_id}/videos/{final_video_id}")
+    return {"id": final_video_id, "success": True, "data": finish_data}
 
 
 def upload_video_direct(video_path, title, description, page_id, access_token):
-    """Fallback single-request multipart upload for standard video files."""
+    """Fallback single-request multipart upload for small video files only (<100MB)."""
     print(f"[facebook] Direct uploading: {title}")
     url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{page_id}/videos"
     payload = {
@@ -156,18 +238,27 @@ def upload_video_direct(video_path, title, description, page_id, access_token):
 def upload_to_facebook(video_path, title, description):
     """
     Upload a video to the configured Facebook Page.
-    Attempts resumable upload first, with automatic fallback to direct multipart upload.
+    Uses resumable chunked upload with retries, falling back to direct upload only for small files.
     """
     page_id, access_token = get_facebook_credentials()
 
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
+    file_size = os.path.getsize(video_path)
+
+    # Resumable upload is used for all videos
     try:
         return upload_video_resumable(video_path, title, description, page_id, access_token)
     except Exception as e:
-        print(f"[facebook] Resumable upload encountered issue ({e}), falling back to direct upload...")
-        return upload_video_direct(video_path, title, description, page_id, access_token)
+        print(f"[facebook] Resumable upload encountered error: {e}")
+        # Only fall back to direct multipart upload if the file is small (< 100 MB)
+        if file_size < 100 * 1024 * 1024:
+            print(f"[facebook] Attempting direct upload fallback for small file ({file_size / (1024 * 1024):.1f} MB)...")
+            return upload_video_direct(video_path, title, description, page_id, access_token)
+        else:
+            print(f"[facebook] File is {file_size / (1024 * 1024):.1f} MB. Direct upload cannot be used for files > 100MB (Meta will reject with HTTP 413).")
+            raise
 
 
 if __name__ == '__main__':

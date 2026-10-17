@@ -40,19 +40,41 @@ def get_published_history():
 
 def save_published_entry(video_name, audio_name, image_name, yt_video_id=None, fb_video_id=None, title=""):
     history = get_published_history()
-    fb_page_id = os.getenv("FB_PAGE_ID", "1278026508735006")
-    entry = {
-        "video_file": os.path.basename(video_name),
-        "audio_file": os.path.basename(audio_name),
-        "image_file": os.path.basename(image_name) if image_name else "",
-        "youtube_id": yt_video_id,
-        "youtube_url": f"https://youtu.be/{yt_video_id}" if yt_video_id else "LOCAL_RENDER",
-        "facebook_id": fb_video_id,
-        "facebook_url": f"https://www.facebook.com/{fb_page_id}/videos/{fb_video_id}" if fb_video_id else None,
-        "title": title,
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-    history.append(entry)
+    fb_page_id = os.getenv("FB_PAGE_ID") or os.getenv("FACEBOOK_PAGE_ID") or "1278026508735006"
+    
+    aud_base = os.path.basename(audio_name).strip().lower()
+    updated = False
+    
+    # Look for existing entry for this audio track to update missing fields (e.g. pending Facebook)
+    for entry in history:
+        e_aud = (entry.get("audio_file") or entry.get("audio_name") or entry.get("song_name") or "").strip().lower()
+        if e_aud == aud_base:
+            if yt_video_id and (not entry.get("youtube_id") or entry.get("youtube_id") == "LOCAL_RENDER"):
+                entry["youtube_id"] = yt_video_id
+                entry["youtube_url"] = f"https://youtu.be/{yt_video_id}"
+            if fb_video_id:
+                entry["facebook_id"] = fb_video_id
+                entry["facebook_url"] = f"https://www.facebook.com/{fb_page_id}/videos/{fb_video_id}"
+            if title:
+                entry["title"] = title
+            entry["timestamp"] = datetime.utcnow().isoformat() + "Z"
+            updated = True
+            break
+            
+    if not updated:
+        entry = {
+            "video_file": os.path.basename(video_name),
+            "audio_file": os.path.basename(audio_name),
+            "image_file": os.path.basename(image_name) if image_name else "",
+            "youtube_id": yt_video_id,
+            "youtube_url": f"https://youtu.be/{yt_video_id}" if yt_video_id else "LOCAL_RENDER",
+            "facebook_id": fb_video_id,
+            "facebook_url": f"https://www.facebook.com/{fb_page_id}/videos/{fb_video_id}" if fb_video_id else None,
+            "title": title,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        history.append(entry)
+        
     with open(PUBLISHED_LOG, 'w', encoding='utf-8') as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
     print(f"[LOG] Saved publication record to {PUBLISHED_LOG}")
@@ -158,9 +180,21 @@ def run_pipeline(duration=3600, dry_run=False):
         return True
         
     # Step 5: Upload to Platforms (YouTube & Facebook)
+    aud_base = os.path.basename(aud_path).strip().lower()
+    existing_yt_id = None
+    for entry in get_published_history():
+        if (entry.get("audio_file") or entry.get("audio_name") or entry.get("song_name") or "").strip().lower() == aud_base:
+            yt_id = entry.get("youtube_id")
+            if yt_id and yt_id != "LOCAL_RENDER":
+                existing_yt_id = yt_id
+                break
+
     upload_yt = os.getenv("UPLOAD_YOUTUBE", "true").lower() not in ("false", "0", "no")
-    yt_video_id = None
-    if not upload_yt:
+    yt_video_id = existing_yt_id
+
+    if existing_yt_id:
+        print(f"\n[youtube] Track '{os.path.basename(aud_path)}' was already published to YouTube ({existing_yt_id}). Skipping YouTube upload.")
+    elif not upload_yt:
         print("\n[youtube] Alternate-day schedule: Skipping YouTube upload today (Facebook will still publish).")
     else:
         try:
@@ -171,18 +205,23 @@ def run_pipeline(duration=3600, dry_run=False):
                 set_video_thumbnail(yt_video_id, thumb_output)
                 print(f"🎉 SUCCESS! Published to YouTube: https://youtu.be/{yt_video_id}")
         except Exception as e:
-            print(f"[YOUTUBE NOTE] YouTube API upload skipped or not configured ({e}). Video is ready in output_videos/")
+            print(f"[YOUTUBE NOTE] YouTube API upload skipped or encountered error ({e}). Video is ready in output_videos/")
 
-    # Facebook Page Upload
+    # Facebook Page Upload (CRITICAL - Primary Target)
     fb_video_id = None
     try:
         from publish_facebook import upload_to_facebook
         print(f"\n[facebook] Uploading to Facebook Page Lumina Blooms...")
         fb_res = upload_to_facebook(final_video_path, title, desc)
-        fb_video_id = fb_res.get("id")
+        fb_video_id = fb_res.get("id") if fb_res else None
+        if not fb_video_id:
+            raise RuntimeError("Facebook API returned empty or invalid video ID.")
         print(f"🎉 SUCCESS! Published to Facebook: {fb_video_id}")
     except Exception as e_fb:
-        print(f"[FACEBOOK NOTE] Facebook upload skipped or encountered error: {e_fb}")
+        print(f"\n[CRITICAL ERROR] Facebook upload failed: {e_fb}")
+        # Save record of YouTube upload so we don't lose that progress
+        save_published_entry(vid_path, aud_path, img_path, yt_video_id=yt_video_id, fb_video_id=None, title=title)
+        raise RuntimeError(f"Facebook publishing failed: {e_fb}. Failing pipeline because Facebook publishing is critical.")
 
     save_published_entry(vid_path, aud_path, img_path, yt_video_id=yt_video_id, fb_video_id=fb_video_id, title=title)
     return True

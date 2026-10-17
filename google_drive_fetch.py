@@ -1,4 +1,4 @@
-﻿"""
+"""
 Google Drive Integration Module for Calm Relaxation Bot (LuminaBlooms)
 Fetches:
 1. Video Loops (MP4) from GOOGLE_DRIVE_VIDEO_FOLDER_ID
@@ -121,13 +121,16 @@ def download_file(file_id, dest_path):
         return False
 
 def get_repost_counts():
-    """Counts how many times each audio track has been published."""
+    """Counts how many times each audio track has been fully published."""
     if os.path.exists(PUBLISHED_LOG):
         try:
             with open(PUBLISHED_LOG, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 counts = {}
                 for item in data:
+                    # If an entry explicitly failed Facebook upload, don't count it as a completed publish
+                    if "facebook_id" in item and not item.get("facebook_id"):
+                        continue
                     sname = (item.get("audio_file") or item.get("audio_name") or item.get("song_name") or "").strip().lower()
                     if sname:
                         counts[sname] = counts.get(sname, 0) + 1
@@ -136,10 +139,28 @@ def get_repost_counts():
             return {}
     return {}
 
+def get_pending_facebook_tracks():
+    """Returns audio filenames that attempted Facebook upload but failed (facebook_id is null/None)."""
+    if os.path.exists(PUBLISHED_LOG):
+        try:
+            with open(PUBLISHED_LOG, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                pending = set()
+                for item in data:
+                    if "facebook_id" in item and not item.get("facebook_id"):
+                        sname = (item.get("audio_file") or item.get("audio_name") or item.get("song_name") or "").strip().lower()
+                        if sname:
+                            pending.add(sname)
+                return pending
+        except Exception:
+            return set()
+    return set()
+
 def fetch_assets_triplet(allow_repost=True):
     """
     Fetches ONE video, ONE audio track, and ONE thumbnail image.
     Supports Infinite Circulation Mode with Weighted Least-Recently-Used selection.
+    Prioritizes tracks that previously failed Facebook upload.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     vid_dir = os.path.join(script_dir, LOCAL_VIDEO_DIR)
@@ -161,9 +182,19 @@ def fetch_assets_triplet(allow_repost=True):
 
         if v_files and a_files and i_files:
             repost_counts = get_repost_counts()
-            unpublished = [f for f in a_files if f['name'].strip().lower() not in repost_counts]
+            pending_fb = get_pending_facebook_tracks()
             
-            if unpublished:
+            # Priority 0: Finish tracks missing Facebook publication
+            pending_audio = [f for f in a_files if f['name'].strip().lower() in pending_fb]
+            unpublished = [f for f in a_files if f['name'].strip().lower() not in repost_counts and f['name'].strip().lower() not in pending_fb]
+            
+            if pending_audio:
+                sel_audio = pending_audio[0]
+                sel_video = v_files[len(repost_counts) % len(v_files)]
+                sel_image = i_files[len(repost_counts) % len(i_files)]
+                is_repost = False
+                print(f"[PIPELINE] Prioritizing track with missing Facebook upload: {sel_audio['name']}")
+            elif unpublished:
                 # Phase 1: Pick unpublished audio first
                 sel_audio = unpublished[0]
                 sel_video = v_files[len(repost_counts) % len(v_files)]
@@ -207,8 +238,15 @@ def fetch_assets_triplet(allow_repost=True):
         return None, None, None, False
 
     repost_counts = get_repost_counts()
-    unpublished = [f for f in local_auds if os.path.basename(f).strip().lower() not in repost_counts]
-    if unpublished:
+    pending_fb = get_pending_facebook_tracks()
+    pending_aud = [f for f in local_auds if os.path.basename(f).strip().lower() in pending_fb]
+    unpublished = [f for f in local_auds if os.path.basename(f).strip().lower() not in repost_counts and os.path.basename(f).strip().lower() not in pending_fb]
+    if pending_aud:
+        sel_aud = pending_aud[0]
+        sel_vid = local_vids[len(repost_counts) % len(local_vids)]
+        sel_img = local_imgs[len(repost_counts) % len(local_imgs)] if local_imgs else None
+        is_repost = False
+    elif unpublished:
         sel_aud = unpublished[0]
         sel_vid = local_vids[len(repost_counts) % len(local_vids)]
         sel_img = local_imgs[len(repost_counts) % len(local_imgs)] if local_imgs else None
