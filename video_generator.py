@@ -109,10 +109,10 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
     # Check encoder
     if is_nvenc_available():
         print("[VIDEO] Using NVIDIA NVENC Hardware Acceleration...")
-        video_codec_args = ['-c:v', 'h264_nvenc', '-cq', '22', '-b:v', '8M']
+        video_codec_args = ['-c:v', 'h264_nvenc', '-cq', '19', '-b:v', '14M']
     else:
-        print("[VIDEO] Using CPU libx264 encoder (veryfast preset, crf 22)...")
-        video_codec_args = ['-c:v', 'libx264', '-crf', '22', '-preset', 'veryfast']
+        print("[VIDEO] Using CPU libx264 encoder (veryfast preset, crf 18)...")
+        video_codec_args = ['-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast']
 
     # Step 3: Full assemble with audio loop and fade out
     print(f"[VIDEO] Assembling full 1080p video...")
