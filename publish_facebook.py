@@ -21,8 +21,9 @@ if sys.platform == 'win32':
 load_dotenv()
 
 GRAPH_API_VERSION = "v21.0"
-# 500 MB chunks: reduces total API calls from 650 down to ~5 calls for a 2.5 GB video
-CHUNK_SIZE = 500 * 1024 * 1024
+# 50 MB chunks: Meta Graph API's official standard chunk size (52,428,800 bytes).
+# Keeps total requests to ~50 for a 2.5 GB video while avoiding HTTP 413 body size limits.
+CHUNK_SIZE = 50 * 1024 * 1024
 
 
 def get_facebook_credentials():
@@ -117,7 +118,8 @@ def upload_video_resumable(video_path, title, description, page_id, access_token
     print(f"[facebook] Session initialized (Session ID: {upload_session_id[:10]}...)")
 
     # Phase 2: TRANSFER CHUNKS
-    chunk_size = CHUNK_SIZE
+    meta_end = int(start_resp.get("end_offset", 0))
+    chunk_size = min(CHUNK_SIZE, meta_end - start_offset) if meta_end > start_offset else CHUNK_SIZE
     max_chunk_retries = 5
 
     with open(video_path, "rb") as f:
@@ -149,6 +151,11 @@ def upload_video_resumable(video_path, title, description, page_id, access_token
                     if t_resp.status_code == 200:
                         t_data = t_resp.json()
                         new_start = int(t_data.get("start_offset", start_offset + len(chunk_data)))
+                        new_end = int(t_data.get("end_offset", 0))
+                        if new_end > new_start:
+                            chunk_size = min(CHUNK_SIZE, new_end - new_start)
+                        else:
+                            chunk_size = CHUNK_SIZE
                         start_offset = new_start
                         chunk_success = True
                         time.sleep(1)  # 1-second pause to prevent hammering the API
