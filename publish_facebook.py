@@ -22,9 +22,9 @@ if sys.platform == 'win32':
 load_dotenv()
 
 GRAPH_API_VERSION = "v21.0"
-# 50 MB chunks: Meta Graph API's official standard chunk size (52,428,800 bytes).
+# 80 MB chunks: Maximum throughput while staying safely below Meta edge proxy's 100 MB HTTP 413 limit.
 # Keeps total requests to ~50 for a 2.5 GB video while avoiding HTTP 413 body size limits.
-CHUNK_SIZE = 50 * 1024 * 1024
+CHUNK_SIZE = 80 * 1024 * 1024
 
 
 def get_facebook_credentials():
