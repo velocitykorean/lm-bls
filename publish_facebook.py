@@ -235,70 +235,33 @@ def upload_video_direct(video_path, title, description, page_id, access_token):
     return data
 
 
-def create_facebook_optimized_video(input_path):
-    """
-    Creates an optimized video copy specifically for Facebook upload (~700-850 MB).
-    The original uncompressed master file (CRF 18) was already uploaded to YouTube.
-    Facebook recompresses all videos anyway, so optimizing the file to ~750 MB
-    slashes Facebook API chunks from 524 calls down to ~15-18 calls.
-    """
-    if not os.path.exists(input_path):
-        return input_path
-
-    file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
-    if file_size_mb <= 850:
-        return input_path
-
-    output_path = os.path.splitext(input_path)[0] + "_fb_optimized.mp4"
-    print(f"[facebook] Generating optimized Facebook video copy from {os.path.basename(input_path)} ({file_size_mb:.1f} MB)...")
-    start_t = time.time()
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", input_path,
-        "-c:v", "libx264",
-        "-preset", "superfast",
-        "-crf", "26",
-        "-c:a", "copy",
-        "-movflags", "+faststart",
-        output_path
-    ]
-
-    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    if res.returncode == 0 and os.path.exists(output_path):
-        out_mb = os.path.getsize(output_path) / (1024 * 1024)
-        elapsed = time.time() - start_t
-        print(f"[facebook] Optimization complete in {elapsed:.1f}s: {file_size_mb:.1f} MB -> {out_mb:.1f} MB ({((file_size_mb - out_mb) / file_size_mb) * 100:.1f}% reduction)")
-        return output_path
-    else:
-        print("[facebook] Note: Optimization failed or skipped, using original video.")
-        return input_path
-
-
 def upload_to_facebook(video_path, title, description):
     """
-    Upload a video to the configured Facebook Page.
-    1. Optimizes video for Facebook (~750 MB) while YouTube gets the full-quality master.
-    2. Uploads via 50 MB chunked resumable upload (~15-18 calls total).
-    3. Immediately removes the temporary optimized video after upload.
+    Upload the pristine master video to Facebook with 100% full quality.
+    - Preserves maximum 1080p sharpness, high bitrate, and studio audio (identical to YouTube).
+    - Zero compression applied: no re-encoding, no softening, no bitrate loss.
+    - Files < 80 MB: Uploaded in a SINGLE HTTP streaming request (1 API call).
+    - Files >= 80 MB: Uploaded via 80 MB resumable chunks (~3-7 calls for short videos, ~25-50 calls for 1-hour videos).
     """
     page_id, access_token = get_facebook_credentials()
 
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
-    fb_video_path = create_facebook_optimized_video(video_path)
-    is_temp = (fb_video_path != video_path)
+    file_size = os.path.getsize(video_path)
+    file_size_mb = file_size / (1024 * 1024)
 
-    try:
-        return upload_video_resumable(fb_video_path, title, description, page_id, access_token)
-    finally:
-        if is_temp and os.path.exists(fb_video_path):
-            try:
-                os.remove(fb_video_path)
-                print(f"[facebook] Cleaned up temporary optimized file: {fb_video_path}")
-            except Exception as e_clean:
-                print(f"[facebook] Note: could not remove temporary file: {e_clean}")
+    # Direct single-call streaming for small videos (< 80 MB)
+    if file_size < 80 * 1024 * 1024:
+        try:
+            print(f"[facebook] Uploading master video via direct single-request stream (1 API call, {file_size_mb:.1f} MB)...")
+            return upload_video_direct(video_path, title, description, page_id, access_token)
+        except Exception as e_direct:
+            print(f"[facebook] Direct upload encountered issue ({e_direct}), falling back to 80MB resumable chunked upload...")
+
+    # Resumable chunked upload for master video (80 MB chunks)
+    print(f"[facebook] Uploading full-quality master ({file_size_mb:.1f} MB) with 80 MB chunks...")
+    return upload_video_resumable(video_path, title, description, page_id, access_token)
 
 
 if __name__ == '__main__':
