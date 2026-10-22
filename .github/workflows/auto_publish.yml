@@ -132,5 +132,6 @@ jobs:
             echo "No changes to published_videos.json to commit."
           else
             git commit -m "chore: update published videos log [skip ci]"
+            git pull --rebase origin main
             git push origin main
           fi
