@@ -3,7 +3,7 @@ name: Auto Publish Calm Relaxation Videos to YouTube (LuminaBlooms)
 on:
   schedule:
     # Runs daily at 8:00 AM UTC (1:30 PM IST)
-    - cron: '0 8 * * *'
+    - cron: '23 7 * * *'
   workflow_dispatch:
     inputs:
       upload_youtube:
@@ -106,13 +106,21 @@ jobs:
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          python auto_pipeline.py --duration "$DURATION" $DRY_RUN_FLAG
-          exit_code=$?
-          if [ $exit_code -ne 0 ]; then
-            echo "Pipeline failed with exit code $exit_code"
-            exit $exit_code
-          fi
-          echo "Pipeline completed successfully."
+          max_retries=2
+          count=0
+          until [ $count -ge $max_retries ]
+          do
+            echo ">>> Execution attempt $((count+1)) of $max_retries..."
+            if python auto_pipeline.py --duration "$DURATION" $DRY_RUN_FLAG; then
+              echo "Pipeline completed successfully."
+              exit 0
+            fi
+            count=$((count+1))
+            echo "Attempt $count failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+          echo "Pipeline failed after $max_retries attempts."
+          exit 1
 
       - name: Commit published videos log
         if: always()
