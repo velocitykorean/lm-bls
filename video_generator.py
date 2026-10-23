@@ -86,7 +86,7 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
         'ffmpeg', '-y',
         '-i', input_video,
         '-vf', vf_arg,
-        '-c:v', 'libx264', '-crf', '15', '-preset', 'fast', '-an',
+        '-c:v', 'libx264', '-crf', '22', '-preset', 'fast', '-an',
         temp_clean
     ]
     subprocess.run(cmd_clean, check=True)
@@ -97,7 +97,7 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
         '-i', temp_clean,
         '-filter_complex', "[0:v]reverse[v_rev];[0:v][v_rev]concat=n=2:v=1:a=0[v_out]",
         '-map', '[v_out]',
-        '-c:v', 'libx264', '-crf', '15', '-preset', 'fast',
+        '-c:v', 'libx264', '-b:v', '1400k', '-maxrate', '1800k', '-bufsize', '3000k', '-preset', 'fast',
         temp_block
     ]
     subprocess.run(cmd_block, check=True)
@@ -112,9 +112,9 @@ def build_calm_relaxation_video(input_video, input_audio, output_path, duration_
     # Check encoder
     if is_nvenc_available():
         print("[VIDEO] Using NVIDIA NVENC Hardware Acceleration...")
-        video_codec_args = ['-c:v', 'h264_nvenc', '-cq', '19', '-b:v', '14M']
+        video_codec_args = ['-c:v', 'h264_nvenc', '-cq', '26', '-b:v', '1600k']
     else:
-        video_codec_args = ['-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast']
+        video_codec_args = ['-c:v', 'libx264', '-b:v', '1400k', '-maxrate', '1800k', '-bufsize', '3000k', '-preset', 'veryfast']
 
     # Step 3: Full assemble with audio loop and fade out using high-speed stream copy
     print(f"[VIDEO] Assembling full 1080p video ({duration_seconds}s) with high-speed stream copy...")

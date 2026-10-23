@@ -227,9 +227,12 @@ def run_pipeline(duration=3600, dry_run=False):
     return True
 
 if __name__ == "__main__":
-    dur = 3600
     is_dry = "--dry-run" in sys.argv
+    dur = 3600
     for idx, arg in enumerate(sys.argv):
-        if arg == "--duration" and idx + 1 < len(sys.argv):
-            dur = int(sys.argv[idx + 1])
+        if arg == "--duration" and idx + 1 < len(sys.argv) and sys.argv[idx + 1].strip():
+            try:
+                dur = int(sys.argv[idx + 1].strip())
+            except ValueError:
+                dur = 3600
     run_pipeline(duration=dur, dry_run=is_dry)
